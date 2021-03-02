@@ -1,29 +1,68 @@
 #lang racket
 
 (provide define-verbs
-        define-thing
-        define-place
-        define-everywhere
+         define-thing
+         define-place
+         define-everywhere
+         
+         show-current-place
+         show-inventory
+         save-game
+         load-game
+         show-help
 
-        verb
-        record-element!
-        
-        show-current-place
-        show-inventory
-        save-game
-        load-game
-        show-help
+         have-thing?
+         take-thing!
+         drop-thing!
+         make-thing!
+         remove-thing!
+         thing-state
+         set-thing-state!
+          
+         (except-out (all-from-out racket) #%module-begin)
+         (rename-out [module-begin #%module-begin]))
 
-        have-thing?
-        take-thing!
-        drop-thing!
-        thing-state
-        set-thing-state!
-        
-        start-game)
+;; ============================================================
+;; Overall module:
+
+(define-syntax module-begin
+  (syntax-rules (define-verbs define-everywhere)
+    [(_ (define-verbs all-verbs cmd ...)
+        (define-everywhere everywhere-actions act ...)
+        decl ...
+        id)
+     (#%module-begin
+      (define-verbs all-verbs cmd ...)
+      (define-everywhere everywhere-actions act ...)
+      decl ...
+      (start-game id
+                  all-verbs
+                  everywhere-actions))]))
+
 
 ;; ============================================================
 ;; Model:
+
+(begin-for-syntax
+  (struct typed
+    (id
+     type)
+     #:property prop:procedure (lambda (self stx) (typed-id self))
+     #:omit-define-syntaxes))
+
+(define-syntax (check-type stx)
+  (syntax-case stx ()
+    [(check-type id type)
+     (let ([v (and (identifier? #'id)
+                   (syntax-local-value #'id (lambda () #f)))])
+       (unless (and (typed? v)
+                    (equal? (syntax-e #'type) (typed-type v)))
+         (raise-syntax-error
+          #f
+          (format "not defined as ~a" (syntax-e #'type))
+          #'id))
+       #'id)]))
+
 
 ;; Elements of the world:
 (struct verb (aliases       ; list of symbols
@@ -48,16 +87,7 @@
 (define (element->name obj) (hash-ref elements obj #f))
 
 ;; ============================================================
-;; The world:
-
-;; Verbs ----------------------------------------
-;; Declare all the verbs that can be used in the game.
-;; Each verb has a canonical name, a set of aliases, 
-;; a printed form, and a boolean indincating whether it
-;; is transitive.
-;;; (define-syntax define-one-verb
-;;;     (syntax-rules (= _)
-;;;         [(one-verb id (= alias ...) desc)]))
+;; Macros for constructing and registering elements:
 
 (define-syntax-rule (define-verbs all-id
                       [id spec ...] ...)
@@ -69,45 +99,58 @@
 (define-syntax define-one-verb
   (syntax-rules (= _)
     [(define-one-verb id (= alias ...) desc)
-     (define id (verb (list 'id 'alias ...) desc #f))]
+     (begin 
+      (define gen-id (verb (list 'id 'alias ...) desc #f)) 
+      (define-syntax id (typed #'gen-id "intransitive verb")))]
     [(define-one-verb id _ (= alias ...) desc)
-     (define id (verb (list 'id 'alias ...) desc #t))]
+     (begin 
+      (define gen-id (verb (list 'id 'alias ...) desc #t)) 
+      (define-syntax id (typed #'gen-id "transitive verb")))]
     [(define-one-verb id)
      (define id (verb (list 'id) (symbol->string 'id) #f))]
     [(define-one-verb id _)
      (define id (verb (list 'id) (symbol->string 'id) #t))]))
 
 
+(define-syntax-rule (define-thing id 
+                      [vrb expr] ...)
+  (begin
+    (define gen-id (thing 'id  
+      #f
+      (list (cons vrb (lambda () expr)) ...)))
+    (define-syntax id (typed #'gen-id "thing"))
+    (record-element! 'id id)))
+
+
+(define-syntax-rule (define-place id
+                      desc 
+                      (thng ...) 
+                      ([vrb expr] ...))
+  (begin
+    (define gen-id (place desc
+                      (list (check-type thng "thing") ...)
+                      (list (cons (check-type vrb "intransitive verb")
+                        (lambda () expr))
+                        ...)))
+    (define-syntax id (typed #'gen-id "place"))
+    (record-element! 'id id)))
+
+
 (define-syntax-rule (define-everywhere id ([vrb expr] ...))
   (define id (list (cons vrb (lambda () expr)) ...)))
 
-;; Things ----------------------------------------
-;; Each thing handles a set of transitive verbs.
-(define-syntax-rule (define-thing id [verb expr] ...)
-    (begin
-        (define id (thing 'id #false (list (cons verb (lambda () expr )) ... )))
-        (record-element! 'id id )))
-
-
-;; Places ----------------------------------------
-;; Each place handles a set of non-transitive verbs.
-(define-syntax-rule (define-place id desc [thing ...] ([verb expr] ...))
-    (begin
-        (define id (place desc
-            (list thing ...)
-            (list (cons verb (lambda () expr)) ...)))
-        (record-element! 'id id)))
-
 ;; ============================================================
 ;; Game state
-(define all-verbs null)
-(define everywhere-actions null)
+
+;; Initialized on startup:
+(define all-verbs null)          ; list of verbs
+(define everywhere-actions null) ; list of verb--thunk pairs
 
 ;; Things carried by the player:
 (define stuff null) ; list of things
 
 ;; Current location:
-(define current-place #f) ; place
+(define current-place #f) ; place (or #f until started)
 
 ;; Fuctions to be used by verb responses:
 (define (have-thing? t)
@@ -118,10 +161,13 @@
 (define (drop-thing! t) 
   (set-place-things! current-place (cons t (place-things current-place)))
   (set! stuff (remq t stuff)))
+(define (make-thing! t)
+  (set-place-things! current-place (cons t (place-things current-place))))
+(define (remove-thing! t)
+  (set-place-things! current-place (remq t (place-things current-place))))
 
 ;; ============================================================
 ;; Game execution
-
 ;; Show the player the current place, then get a command:
 (define (do-place)
   (show-current-place)
@@ -146,13 +192,13 @@
     (if (and (list? input)
              (andmap symbol? input)
              (<= 1 (length input) 2))
-        (let ([cmd (car input)])
+        (let ([vrb (car input)])
             (let ([response
                    (cond
                     [(= 2 (length input))
-                     (handle-transitive-verb cmd (cadr input))]
+                     (handle-transitive-verb vrb (cadr input))]
                     [(= 1 (length input))
-                     (handle-intransitive-verb cmd)])])
+                     (handle-intransitive-verb vrb)])])
               (let ([result (response)])
                 (cond
                  [(place? result)
@@ -167,24 +213,24 @@
             (do-verb)))))
 
 ;; Handle an intransitive-verb command:
-(define (handle-intransitive-verb cmd)
+(define (handle-intransitive-verb vrb)
   (or
-   (find-verb cmd (place-actions current-place))
-   (find-verb cmd everywhere-actions)
+   (find-verb vrb (place-actions current-place))
+   (find-verb vrb everywhere-actions)
    (using-verb 
-    cmd all-verbs
+    vrb all-verbs
     (lambda (verb)
       (lambda () 
         (if (verb-transitive? verb)
             (format "~a what?" (string-titlecase (verb-desc verb)))
             (format "Can't ~a here." (verb-desc verb))))))
    (lambda ()
-     (format "I don't know how to ~a." cmd))))
+     (format "I don't know how to ~a." vrb))))
 
 ;; Handle a transitive-verb command:
-(define (handle-transitive-verb cmd obj)
+(define (handle-transitive-verb vrb obj)
   (or (using-verb 
-       cmd all-verbs
+       vrb all-verbs
        (lambda (verb)
          (and 
           (verb-transitive? verb)
@@ -195,7 +241,7 @@
                    (append (place-things current-place)
                            stuff))
             => (lambda (thing)
-                 (or (find-verb cmd (thing-actions thing))
+                 (or (find-verb vrb (thing-actions thing))
                      (lambda ()
                        (format "Don't know how to ~a ~a."
                                (verb-desc verb) obj))))]
@@ -204,7 +250,7 @@
               (format "There's no ~a here to ~a." obj 
                       (verb-desc verb)))]))))
       (lambda ()
-        (format "I don't know how to ~a ~a." cmd obj))))
+        (format "I don't know how to ~a ~a." vrb obj))))
 
 ;; Show what the player is carrying:
 (define (show-inventory)
@@ -237,6 +283,7 @@
   (printf "Use `look' to look around.\n")
   (printf "Use `inventory' to see what you have.\n")
   (printf "Use `save' or `load' to save or restore your game.\n")
+  (for-each (lambda (verb) (displayln (verb-aliases verb))) all-verbs)
   (printf "There are some other verbs, and you can name a thing after some verbs.\n"))
 
 ;; ============================================================
@@ -288,9 +335,6 @@
              [(place? v) (set-place-things! v (map name->element state))]
              [(thing? v) (set-thing-state! v state)])))
         (caddr v))))))
-
-;; ============================================================
-;; Go!
 
 (define (start-game in-place
                     in-all-verbs
