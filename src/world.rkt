@@ -10,6 +10,8 @@
   [use _]
   [attack _]
   [loot _]
+  [walk _]
+  [give _]
   [north (= n) "go north"]
   [south (= s) "go south"]
   [east (= e) "go east"]
@@ -26,6 +28,7 @@
   [quit (= exit) "quit"]
   [look (= show) "look around"]
   [inventory (=) "check inventory"]
+  [restart]
   [help]
   [save]
   [load])
@@ -39,26 +42,34 @@
    [inventory (show-inventory)]
    [save (save-game)]
    [load (load-game)]
-   [help (show-help)]))
+   [help (show-help)]
+   [restart (restart-game)])
+)
 
 ;; Objects ----------------------------------------
 
 (define-thing chest
-  [examine (cdr (thing-state chest))]
+  [examine 
+    (if (pair? (thing-state chest)) 
+      (for-each (lambda (t) (displayln t)) (cdr (thing-state chest))) 
+    "A closed chest"
+  )]
   [loot 
     (if (eq? (car (thing-state chest)) 'open)
       (begin
         (take-thing! (cdr (thing-state chest)))
+        (set-thing-state! chest '(open ()))
         "Item looted!")
       "Can't loot closed chest")]
-  [open (if (have-thing? key)
-            (begin
-              (set-thing-state! chest (cons 'open gold))
-              "Chest is open."
-            ) 
-            "key needed"
-        )]
-)
+  [open 
+    (if (have-thing? key)
+      (begin
+        (set-thing-state! chest '(open (gold)))
+        "Chest is open."
+      ) 
+      "key needed"
+    )
+  ])
 (define-thing cactus
   ([get "Ouch!"]
   [render "C"]))
@@ -101,16 +112,15 @@
       )
       (remove-thing! goblin)
       "You kill the goblin!\n"
-    )
-  ]
+    )]
   [examine "A dirty goblin"]
-  [get "It pushes you!"]
   [render "g"])
 
 (define-thing sword
   [get (begin (take-thing! sword) "You got a sword!")]
   [put (begin (drop-thing! sword) "You dropped sword!")]
   [swing "You swing your sword"])
+
 (define-thing gold)
 (define-thing spellbook
   [get (begin (take-thing! spellbook) "You got a spellbook.")])
@@ -119,7 +129,7 @@
   [use (begin (make-thing! goblin) "Goblin spawned")])
 
 (define-place meadow
-  "You're standing in a meadow. There is a house to the north."
+  "You're standing in a meadow."
   [sword spawner key chest]
   ([north house-front]
    [south desert]
@@ -149,6 +159,11 @@
   "You're in the house."
   [trophy]
   ([out house-front]))
+(define-place store
+  "You're in the weapons store"
+  [sword]
+  ()
+)
 
 ;; Starting place ----------------------------------
 

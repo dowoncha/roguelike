@@ -1,11 +1,8 @@
 SRCDIR = src
 BUILDDIR = build
 
-build: world.rkt
-	raco exe world.rkt 
-
-client: client.rkt
-	raco exe --gui client.rkt
+rogue: main.rkt
+	raco exe -o rogue --gui main.rkt
 
 clean:
-	rm -rf build
+	rm rogue

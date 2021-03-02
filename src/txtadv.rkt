@@ -9,6 +9,7 @@
          show-inventory
          save-game
          load-game
+         restart-game
          show-help
 
          have-thing?
@@ -135,7 +136,6 @@
     (define-syntax id (typed #'gen-id "place"))
     (record-element! 'id id)))
 
-
 (define-syntax-rule (define-everywhere id ([vrb expr] ...))
   (define id (list (cons vrb (lambda () expr)) ...)))
 
@@ -178,7 +178,9 @@
   (printf "~a\n" (place-desc current-place))
   (for-each (lambda (thing)
               (printf "There is a ~a here.\n" (thing-name thing)))
-            (place-things current-place)))
+            (place-things current-place))
+  ;;; (for-each (lambda (c) (printf "#")) (range 10)))
+)
 
 ;; Get and handle a command:
 (define (do-verb)
@@ -335,6 +337,8 @@
              [(place? v) (set-place-things! v (map name->element state))]
              [(thing? v) (set-thing-state! v state)])))
         (caddr v))))))
+
+(define (restart-game) "Restarting...")
 
 (define (start-game in-place
                     in-all-verbs

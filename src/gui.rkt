@@ -1,7 +1,8 @@
 #lang racket
 
+(provide make-gui)
+
 (require racket/gui racket/draw)
-(require "main-menu.rkt")
 
 ;; ============================================================
 ;; UI
@@ -32,7 +33,8 @@
             [parent frame]
             ;;; [width-in-characters width-in-chars]
             ;;; [height-in-characters height-in-chars]
-        ))
+        )
+    )
     ; Define overriding method to handle mouse events
     ;;; (define/override (on-event event)
     ;;;   (send msg set-label "Canvas mouse"))
@@ -44,7 +46,7 @@
     (super-new)))
  
 ; Make a canvas that handles events in the frame
-(new gui% 
+(define (make-gui) (new gui% 
     [width 800]
     [height 600]
     ;;; [paint-callback
@@ -52,7 +54,7 @@
     ;;;     (send dc set-scale 3 3)
     ;;;     (send dc set-text-foreground "blue")
     ;;;     (send dc draw-text "Don't Panic!" 0 0))]
-)
+))
 
 ;;; (define active-screen (new main-menu-screen%))
 
